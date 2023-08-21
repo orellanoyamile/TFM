@@ -1,0 +1,397 @@
+# Imports
+import sys
+import pandas as pd
+import numpy as np
+import sklearn
+import keras
+import matplotlib.pyplot as plt
+from pandas.plotting import scatter_matrix
+import seaborn as sns
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.optimizers import Adam
+from keras.layers import Dropout
+from keras import regularizers
+from sklearn.metrics import classification_report, accuracy_score
+from sklearn import model_selection
+
+# Reading csv file from Google Drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+ruta_del_archivo = "/content/drive/My Drive/Modelo de Redes Neuronales Recurrentes (RNN)/2. Datos/1. Datos procesados/V4/Well_1465_dep_V4.csv"
+df = pd.read_csv(ruta_del_archivo)
+
+# Shape of DataFrame
+print( 'Shape of DataFrame: {}'.format(df.shape))
+print (df.loc[1])
+
+# Drop rows with NaN values from DataFrame
+df = df.dropna(axis=0)
+
+# Drop 'DateTime' column from DataFrame because drilling operations don't depends on seasonality
+df.drop(columns=['DateTime'], inplace=True)
+
+# Drop 'prop_missings' column because it doesn't add value to the model
+df.drop(columns=['prop_missings'], inplace=True)
+
+# Resampling the data to balance classes
+first_9_days = df.head(78000)
+
+# Save resampling in a new dataframe
+new_df = first_9_days.copy()
+
+# Print the shape and data type of the dataframe
+print(new_df.shape)
+print(new_df.dtypes)
+
+# Create the target variable
+new_df['Pegado_por_presiones'] = 0
+
+# Establish the conditions for the target variable
+new_df['Pegado_por_presiones'] = ((new_df['Rate Of Penetration (m_per_hr)'] == 0.0) &
+                              ((new_df['Hook Load (kDaN)'] > 20) & (new_df['Hook Load (kDaN)'] < 60)) &
+                              (new_df['Rotary RPM (RPM)'] == 0.0) &
+                              ((new_df['Differential Pressure (psi)'] < 4000) & (new_df['Differential Pressure (psi)'] > -4200)))
+total_sticking = new_df['Pegado_por_presiones'].sum()
+print('Total de registros por pressure sticking:', total_sticking)
+
+# Convert target variable to binary
+new_df['Pegado_por_presiones'] = new_df['Pegado_por_presiones'].apply(lambda x: 1 if x else 0)
+
+# create training and testing datasets
+X = np.array(new_df.drop(['Pegado_por_presiones'], 1))
+y = np.array(new_df['Pegado_por_presiones'])
+
+X_train, X_test, y_train, y_test = model_selection.train_test_split(X, y, stratify=y, random_state=42, test_size = 0.2)
+
+X[0]
+
+# Convert the data to categorical labels
+from keras.utils.np_utils import to_categorical
+
+Y_train = to_categorical(y_train, num_classes=None)
+Y_test = to_categorical(y_test, num_classes=None)
+print (Y_train.shape)
+print (Y_train[:10])
+
+"""### **A simple model**"""
+
+from tensorflow.keras import layers
+model = keras.Sequential([
+    layers.Dense(12, activation='relu', input_shape=[11]),
+    layers.Dense(4, activation='relu'),
+    layers.Dense(1, activation='sigmoid'),
+])
+
+model.compile(
+    optimizer='adam',
+    loss='binary_crossentropy',
+    metrics=['binary_accuracy'],
+)
+
+early_stopping = keras.callbacks.EarlyStopping(
+    patience=10,
+    min_delta=0.001,
+    restore_best_weights=True,
+)
+
+history = model.fit(
+    X_train, y_train,
+    validation_data=(X_test, y_test),
+    batch_size=132,
+    epochs=10,
+    verbose=1
+)
+
+# Commented out IPython magic to ensure Python compatibility.
+# %matplotlib inline
+# Model accuracy
+plt.plot(history.history['binary_accuracy'])
+plt.plot(history.history['val_binary_accuracy'])
+plt.title('Model Accuracy')
+plt.ylabel('binary_accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+# Model Losss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+# Give the predictions of the model with the test data
+y_pred = model.predict(X_test)
+y_pred_classes = np.round(y_pred)
+
+# Show the classification report
+report = classification_report(y_test, y_pred_classes)
+print(report)
+
+"""### **A deep model**"""
+
+# define a new keras model for binary classification
+def create_binary_model():
+    # create model
+    model = Sequential()
+    model.add(Dense(64, input_dim=11, kernel_initializer='normal',  kernel_regularizer=regularizers.l2(0.0025),activation='relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(32, kernel_initializer='normal',  kernel_regularizer=regularizers.l2(0.0025),activation='relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(1, activation='sigmoid'))
+
+    # Compile model
+    adam = Adam(lr=0.0025)
+    model.compile(loss='binary_crossentropy', optimizer='rmsprop', metrics=['accuracy'])
+    return model
+#puede ser optimizador Adam en lugar de rmsprop
+model = create_binary_model()
+
+print(model.summary())
+
+# fit the binary model on the training data
+history=model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=10, batch_size=256)
+
+# Commented out IPython magic to ensure Python compatibility.
+# %matplotlib inline
+# Model accuracy
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title('Model Accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+# Model Losss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+y_pred = model.predict(X_test)
+y_pred_classes = np.round(y_pred)
+
+report = classification_report(y_test, y_pred_classes)
+print(report)
+
+"""### **A complex model with hidden layers**"""
+
+def create_hidden_layers_model():
+    model = Sequential()
+    model.add(Dense(64, input_dim=11, kernel_initializer='normal', kernel_regularizer=regularizers.l2(0.005), activation='relu'))
+    model.add(Dropout(0.25))
+    model.add(Dense(32, kernel_initializer='normal', kernel_regularizer=regularizers.l2(0.005), activation='relu'))
+    model.add(Dropout(0.25))
+    model.add(Dense(16, kernel_initializer='normal', kernel_regularizer=regularizers.l2(0.005), activation='relu'))
+    model.add(Dropout(0.25))
+    model.add(Dense(1, activation='sigmoid'))
+
+    adam = Adam(lr=0.005)
+    model.compile(loss='binary_crossentropy', optimizer='rmsprop', metrics=['accuracy'])
+    return model
+
+model = create_hidden_layers_model()
+
+print(model.summary())
+
+# fit the model to the training data
+history = model.fit(X_train, y_train, validation_data=(X_test, y_test),epochs=10, batch_size=256)
+
+# Commented out IPython magic to ensure Python compatibility.
+# %matplotlib inline
+# Model accuracy
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title('Model Accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+# Model Losss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+y_pred = model.predict(X_test)
+y_pred_classes = np.round(y_pred)
+
+report = classification_report(y_test, y_pred_classes)
+print(report)
+
+"""### **A complex model with 'tanh' functions**"""
+
+def create_tanh_model():
+    model = Sequential()
+    model.add(Dense(64, input_dim=11, kernel_initializer='normal', kernel_regularizer=regularizers.l2(0.0025), activation='tanh'))
+    model.add(Dropout(0.25))
+    model.add(Dense(32, kernel_initializer='normal', kernel_regularizer=regularizers.l2(0.0025), activation='tanh'))
+    model.add(Dropout(0.25))
+    model.add(Dense(16, kernel_initializer='normal', kernel_regularizer=regularizers.l2(0.0025), activation='tanh'))
+    model.add(Dropout(0.25))
+    model.add(Dense(1, activation='sigmoid'))
+
+    adam = Adam(lr=0.0025)
+    model.compile(loss='binary_crossentropy', optimizer='rmsprop', metrics=['accuracy'])
+    return model
+
+model = create_tanh_model()
+
+print(model.summary())
+
+# fit the model to the training data
+history = model.fit(X_train, y_train, validation_data=(X_test, y_test),epochs=10, batch_size=256)
+
+# Commented out IPython magic to ensure Python compatibility.
+# %matplotlib inline
+# Model accuracy
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title('Model Accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+# Model Losss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+y_pred = model.predict(X_test)
+y_pred_classes = np.round(y_pred)
+
+report = classification_report(y_test, y_pred_classes)
+print(report)
+
+"""## **Final model**"""
+
+# define a new keras model for binary classification
+def create_final_model():
+    # create model
+    model = Sequential()
+    model.add(Dense(128, input_dim=11, kernel_initializer='normal',  kernel_regularizer=regularizers.l2(0.0055),activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(64, kernel_initializer='normal',  kernel_regularizer=regularizers.l2(0.0055),activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(32, kernel_initializer='normal',  kernel_regularizer=regularizers.l2(0.0055),activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(16, kernel_initializer='normal',  kernel_regularizer=regularizers.l2(0.0055),activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(8, kernel_initializer='normal',  kernel_regularizer=regularizers.l2(0.0055),activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(1, activation='sigmoid'))
+
+    # Compile model
+    adam = Adam(lr=0.0055)
+    model.compile(loss='binary_crossentropy', optimizer='rmsprop', metrics=['accuracy'])
+    return model
+#puede ser optimizador Adam en lugar de rmsprop
+model = create_binary_model()
+
+print(model.summary())
+
+# fit the model to the training data
+history = model.fit(X_train, y_train, validation_data=(X_test, y_test),epochs=15, batch_size=256)
+
+# Commented out IPython magic to ensure Python compatibility.
+# %matplotlib inline
+# Model accuracy
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title('Model Accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+# Model Losss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model Loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'])
+plt.show()
+
+y_pred = model.predict(X_test)
+y_pred_classes = np.round(y_pred)
+
+report = classification_report(y_test, y_pred_classes)
+print(report)
+
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, BatchNormalization
+from keras.optimizers import Adam
+from keras.regularizers import l2
+
+def create_final_model():
+    # create model
+    model = Sequential()
+    model.add(Dense(128, input_dim=11, kernel_initializer='normal', kernel_regularizer=l2(0.001), activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.5))
+
+    model.add(Dense(64, kernel_initializer='normal', kernel_regularizer=l2(0.001), activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.5))
+
+    model.add(Dense(32, kernel_initializer='normal', kernel_regularizer=l2(0.001), activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.5))
+
+    model.add(Dense(16, kernel_initializer='normal', kernel_regularizer=l2(0.001), activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.5))
+
+    model.add(Dense(8, kernel_initializer='normal', kernel_regularizer=l2(0.001), activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.5))
+
+    model.add(Dense(1, activation='sigmoid'))
+
+    # Compile model
+    adam = Adam(lr=0.0015)
+    model.compile(loss='binary_crossentropy', optimizer='rmsprop', metrics=['accuracy'])
+    return model
+
+# Crear el modelo
+model = create_final_model()
+
+print(model.summary())
+
+# fit the model to the training data
+history = model.fit(X_train, y_train, validation_data=(X_test, y_test),epochs=15, batch_size=256)
+
+y_pred = model.predict(X_test)
+y_pred_classes = np.round(y_pred)
+
+report = classification_report(y_test, y_pred_classes)
+print(report)
+
+from google.colab import files
+
+# Crear el modelo
+model = create_final_model()
+
+# Guardar el modelo en formato de archivo
+model.save('mi_modelo.h5')
+
+# Descargar el modelo a tu PC local
+files.download('mi_modelo.h5')
