@@ -1,0 +1,169 @@
+#!/usr/bin/env python
+# coding: utf-8
+# <center><h2><u><b>Análisis exploratorio y depuración de los datos</b></u></h2></center>
+# In[1]:
+# Imports necesarios
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+#Configuración de opciones de visualización
+pd.set_option("display.max_rows", None, "display.max_columns", None)
+
+# <h3 style="text-align: left; font-size: 18px; color: #808080;"><strong><font color="#808080">Lectura de datos - Well_1465</font></strong></h3>
+# In[2]:
+well_1465 = pd.read_csv('/Users/mariayamileorellano/Desktop/Master/TFM/Datos/YPF.Nq.LLL - 1465/YPF.Nq.LLL-1465(h)28_6 27_7.csv')
+well_1465.head()
+# <h5 style="font-size: 18px; font-weight: bold; text-decoration: underline;">Verificación de información y tipos de campos del dataset</h5>
+
+# In[3]:
+well_1465.info()
+## Combinar columnas de fecha y hora
+well_1465['DateTime'] = pd.to_datetime(well_1465['YYYY/MM/DD'] + ' ' + well_1465['HH:MM:SS'])
+## Convertir la columna combinada en tipo de datos de fecha/hora
+well_1465['DateTime'] = pd.to_datetime(well_1465['DateTime'])
+## Establecer la columna de tiempo como índice
+well_1465.set_index('DateTime', inplace=True)
+# Eliminar columnas 'YYYY/MM/DD' y 'HH:MM:SS'
+well_1465.drop(['YYYY/MM/DD', 'HH:MM:SS'], axis=1, inplace=True)
+# In[4]:
+## Definición del orden deseado de las columnas
+column_order = ['Hole Depth (meters)', 'Bit Depth (meters)', 'Rate Of Penetration (m_per_hr)',
+                'Weight on Bit (kDaN)', 'Hook Load (kDaN)', 'Rotary RPM (RPM)', 'Standpipe Pressure (psi)',
+                'Rotary Torque (ft_lb)', 'Differential Pressure (psi)', 'Total Pump Output (gal_per_min)', 'Block Height (meters)']
+## Reindexación de las columnas en cada DataFrame según el orden deseado
+well_1465_ind = well_1465.reindex(columns=column_order)
+# In[5]:
+well_1465_ind.head()
+## Número de valores distintos por variable
+well_1465_ind.nunique()
+# In[6]:
+well_1465_ind.describe()
+# In[7]:
+columnas = well_1465_ind.columns
+fig, axes = plt.subplots(nrows=len(columnas), figsize=(10, 6*len(columnas)))
+for i, columna in enumerate(columnas):
+    plt.subplot(len(columnas), 1, i+1)
+    sns.histplot(data=well_1465_ind, x=columna)
+    plt.xlabel(columna)
+    plt.ylabel('Count')
+    plt.title(f'Histograma - {columna}')
+plt.show()
+# In[8]:
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=well_1465_ind, x='Bit Depth (meters)', y='Hole Depth (meters)')
+plt.xlabel('Bit Depth (meters)')
+plt.ylabel('Hole Depth (meters)')
+plt.title('Diagrama de dispersión - Bit Depth vs Hole Depth')
+plt.show()
+# In[9]:
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=well_1465_ind, x='Rate Of Penetration (m_per_hr)', y='Weight on Bit (kDaN)')
+plt.xlabel('Rate Of Penetration (m_per_hr)')
+plt.ylabel('Weight on Bit')
+plt.title('Diagrama de dispersión - Rate Of Penetration vs Weight on Bit')
+plt.show()
+# In[10]:
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=well_1465_ind, x='Hook Load (kDaN)', y='Rotary RPM (RPM)')
+plt.xlabel('Hook Load (kDaN)')
+plt.ylabel('Rotary RPM (RPM)')
+plt.title('Diagrama de dispersión - Hook Load vs Rotary RPM')
+plt.show()
+# In[11]:
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=well_1465_ind, x='Standpipe Pressure (psi)', y='Differential Pressure (psi)')
+plt.xlabel('Standpipe Pressure (psi)')
+plt.ylabel('Differential Pressure (psi)')
+plt.title('Diagrama de dispersión - Standpipe Pressure vs Differential Pressure')
+plt.show()
+# In[12]:
+plt.figure(figsize=(10, 6))
+sns.boxplot(data=well_1465_ind)
+plt.xticks(rotation=45)
+plt.title('Boxplot - Variables')
+plt.show()
+
+# In[13]:
+plt.figure(figsize=(10, 8))
+corr_matrix = well_1465_ind.corr()
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm')
+plt.title('Heatmap - Matriz de correlación')
+plt.show()
+# In[14]:
+well_1465_ind.select_dtypes(include=np.number).apply(lambda x: x.skew())
+# In[15]:
+## Función manual de winsor con clip+quantile 
+def winsorize_with_pandas(s, limits):
+    """
+    s : pd.Series
+        Series to winsorize
+    limits : tuple of float
+        Tuple of the percentages to cut on each side of the array, 
+        with respect to the number of unmasked data, as floats between 0. and 1
+    """
+    return s.clip(lower=s.quantile(limits[0], interpolation='lower'), 
+                  upper=s.quantile(1-limits[1], interpolation='higher'))
+
+# In[16]:
+## Función para gestionar outliers
+def gestiona_outliers(col,clas = 'check'):
+     print(col.name)
+     # Condición de asimetría y aplicación de criterio 1 según el caso
+     if abs(col.skew()) < 1:
+        criterio1 = abs((col-col.mean())/col.std())>3
+     else:
+        criterio1 = abs((col-col.median())/col.mad())>8
+     
+     # Calcular primer cuartil     
+     q1 = col.quantile(0.25)  
+     # Calcular tercer cuartil  
+     q3 = col.quantile(0.75)
+     # Calculo de IQR
+     IQR=q3-q1
+     # Calcular criterio 2 (general para cualquier asimetría)
+     criterio2 = (col<(q1 - 3*IQR))|(col>(q3 + 3*IQR))
+     lower = col[criterio1&criterio2&(col<q1)].count()/col.dropna().count()
+     upper = col[criterio1&criterio2&(col>q3)].count()/col.dropna().count()
+     # Salida según el tipo deseado
+     if clas == 'check':
+            return(lower*100,upper*100,(lower+upper)*100)
+     elif clas == 'winsor':
+            return(winsorize_with_pandas(col,(lower,upper)))
+     elif clas == 'miss':
+            print('\n MissingAntes: ' + str(col.isna().sum()))
+            col.loc[criterio1&criterio2] = np.nan
+            print('MissingDespues: ' + str(col.isna().sum()) +'\n')
+            return(col)
+# Llamada en modo check
+well_1465_ind.select_dtypes(include=np.number).copy().apply(lambda x: gestiona_outliers(x))
+# In[17]:
+## Crear copia para evitar pisar información
+well_1465_ind_copy = well_1465_ind.select_dtypes(include=np.number).copy()
+## Aplicar la gestión de outliers en modelo winsor
+well_1465_winsor = well_1465_ind_copy.apply(lambda x: gestiona_outliers(x,clas='miss'))
+# In[18]:
+## Contemos si ha desaparecido algún resgitro o algo 
+well_1465_winsor.apply(lambda x: x.isna().sum()/x.count()*100)
+# In[19]:
+#Proporción de missings por observación (como una nueva columna del dataset)
+well_1465_winsor['prop_missings'] = well_1465_winsor.apply(lambda x: x.isna().sum()/x.count()*100,axis=1)
+# Valoramos distribución
+well_1465_winsor.prop_missings.describe()
+# Vamos a ordenar el archivo por la nueva variable creada para ver el aspecto.
+# In[20]:
+well_1465_winsor.sort_values(by='prop_missings', ascending=False).head()
+# In[21]:
+#conda config --add channels conda-forge
+#conda install missingno
+#pip install missingno
+import missingno as msno   
+# Plot correlation heatmap of missingness
+msno.matrix(well_1465_winsor.sort_values(by='Weight on Bit (kDaN)'))
+# In[22]:
+msno.heatmap(well_1465_winsor)
+# In[23]:
+well_1465_winsor.to_csv('Well_1465_dep.csv')
+
+
+
