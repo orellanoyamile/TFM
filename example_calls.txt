@@ -1,0 +1,10 @@
+# POST method predict
+curl -d '[{"Hook Load (kDaN)": 60, "Differential Pressure (psi)": 4000, "Rotary RPM (RPM)": 0.00, "Rate Of Penetration (m_per_hr)": 0.00}]' \
+     -H "Content-Type: application/json" \
+     -X POST http://0.0.0.0:8000/predict
+
+# GET method info
+curl -X GET http://localhost:8000/info
+
+# GET method sticking
+curl -X GET http://localhost:8000/sticking
